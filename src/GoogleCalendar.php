@@ -35,7 +35,7 @@ class GoogleCalendar
 		
 		
 		$ch = curl_init();		
-		curl_setopt($ch, CURLOPT_URL, URL_SETTING_TIMEZONE);		
+		curl_setopt($ch, CURLOPT_URL, self::URL_SETTING_TIMEZONE);		
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);	
 		curl_setopt($ch, CURLOPT_HTTPHEADER, array('Authorization: Bearer '. $this->access_token));	
 		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);	
