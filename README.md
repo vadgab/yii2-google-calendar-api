@@ -27,9 +27,9 @@ This application operates with Google Calendar Service Account-based  authentica
 
 You will need to create a Service Account in the Google Cloud Console,  to which you must grant the appropriate permissions to access the calendar, as well as a authentication key, which you download and place  for the application to access, and provide the path to it.
 
-![image-20230505121456420](./doc/images\image-20230505121456420.png)
+![image-20230505121456420](./doc/images/image-20230505121456420.png)
 
-![image-20230505121615217](./doc/images\image-20230505121615217.png)
+![image-20230505121615217](./doc/images/image-20230505121615217.png)
 
 ## Basic Usage 
 
