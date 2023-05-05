@@ -1,152 +1,260 @@
 <?php
 
+namespace vadgab\Yii2GoogleCalendar; 
+
+use \Exception;
 class GoogleCalendar
 {
+    private $serviceAccountEmail;
+    private $privateKey;
+    private $scopes;
+    private $accessToken;
 
-	public $client_id = "";
-	public $redirect_uri = "";
-	public $client_secret = "";
-	public $code = "";	
-	public $access_token = "";
-	public $all_day = false;
+	public $calendarId = "";
+	public $eventId = "";
+	private $url = "";
+
 	const URL_SETTING_TIMEZONE = "https://www.googleapis.com/calendar/v3/users/me/settings/timezone";
+	const URL_OAUTH2_TOKEN = "https://www.googleapis.com/oauth2/v4/token";
+	
+	/**
+	 * __construct
+	 *
+	 * @param  mixed $serviceAccountEmail
+	 * @param  mixed $privateKeyFile
+	 * @param  mixed $scopes
+	 * @return void
+	 */
+	public function __construct($serviceAccountEmail, $privateKeyFile, $scopes)
+    {
+        $this->serviceAccountEmail = $serviceAccountEmail;
+        $this->privateKey = file_get_contents($privateKeyFile);
+        $this->scopes = $scopes;
+        $this->accessToken = $this->getAccessToken();
+    }
+
+	private function getAccessToken()
+    {
+
+
+        $jwt = $this->generateJwtToken();
+        $params = array(
+            "grant_type" => "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion" => $jwt
+        );
+		$response = self::connectCurlToken($params);
+        $json = json_decode($response, true);
+        return $json["access_token"];
+    }
+
+	private function generateJwtToken()
+    {
+        $header = array(
+            "alg" => "RS256",
+            "typ" => "JWT"
+        );
+
+        $now = time();
+        $exp = $now + 3600;
+        $payload = array(
+            "iss" => $this->serviceAccountEmail,
+            "scope" => implode(" ", $this->scopes),
+            "aud" => self::URL_OAUTH2_TOKEN,
+            "exp" => $exp,
+            "iat" => $now
+        );
+
+		$keyJson = json_decode($this->privateKey, true);
+		
+		// Lekérjük a privát kulcsot és dekódoljuk
+		$privateKey = openssl_pkey_get_private($keyJson['private_key']);
+
+        $jwt = $this->jwtEncode($header, $payload, $privateKey, 'RS256');
+        return $jwt;
+    }
+	
+	/**
+	 * jwtEncode
+	 *
+	 * @param  mixed $header
+	 * @param  mixed $payload
+	 * @param  mixed $privateKey
+	 * @param  mixed $alg
+	 * @return void
+	 */
+	private function jwtEncode($header, $payload, $privateKey, $alg = "RS256")
+	{
+		$segments = array();
+		$segments[] = base64_encode(json_encode($header));
+		$segments[] = base64_encode(json_encode($payload));
+		$signing_input = implode(".", $segments);
+
+		$signature = "";
+		switch ($alg) {
+			case "RS256":
+				openssl_sign($signing_input, $signature, $privateKey, OPENSSL_ALGO_SHA256);
+				break;
+			case "RS384":
+				openssl_sign($signing_input, $signature, $privateKey, OPENSSL_ALGO_SHA384);
+				break;
+			case "RS512":
+				openssl_sign($signing_input, $signature, $privateKey, OPENSSL_ALGO_SHA512);
+				break;
+			default:
+				throw new Exception("Unsupported signing algorithm: " . $alg);
+		}
+
+		$segments[] = base64_encode($signature);
+		return implode(".", $segments);
+	}
 
 	
-
-	public function getAccessToken() {	
-		$url = 'https://accounts.google.com/o/oauth2/token';			
+	/**
+	 * connectCurlToken
+	 *
+	 * @param  mixed $params
+	 * @return void
+	 */
+	private function connectCurlToken($params){
+        
+		$ch = curl_init(self::URL_OAUTH2_TOKEN);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
+        $response = curl_exec($ch);
+        curl_close($ch);
 		
-		$curlPost = 'client_id=' . $this->client_id . '&redirect_uri=' . $this->redirect_uri . '&client_secret=' . $this->client_secret . '&code='. $this->code . '&grant_type=authorization_code';
-		$ch = curl_init();		
-		curl_setopt($ch, CURLOPT_URL, $url);		
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);		
-		curl_setopt($ch, CURLOPT_POST, 1);		
-		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
-		curl_setopt($ch, CURLOPT_POSTFIELDS, $curlPost);	
-		$data = json_decode(curl_exec($ch), true);
-		$http_code = curl_getinfo($ch,CURLINFO_HTTP_CODE);		
-		if($http_code != 200) 
-			throw new Exception('Error : Failed to receieve access token');
-			
-		return $data;
+		return $response;
+	}	
+	/**
+	 * connectCurl
+	 *
+	 * @param  mixed $headers
+	 * @return void
+	 */
+	private function connectCurl($headers){
+
+        $ch = curl_init($this->url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        $response = curl_exec($ch);
+        curl_close($ch);
+		return $response; 
+
 	}
 
-	public function getUserCalendarTimezone() {
-		
-		
-		$ch = curl_init();		
-		curl_setopt($ch, CURLOPT_URL, self::URL_SETTING_TIMEZONE);		
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);	
-		curl_setopt($ch, CURLOPT_HTTPHEADER, array('Authorization: Bearer '. $this->access_token));	
-		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);	
-		$data = json_decode(curl_exec($ch), true); //echo '<pre>';print_r($data);echo '</pre>';
-		$http_code = curl_getinfo($ch,CURLINFO_HTTP_CODE);		
-		if($http_code != 200) 
-			throw new Exception('Error : Failed to get timezone');
+	private function connectCurlwithPost($headers,$payload){
 
-		return $data['value'];
+        $ch = curl_init($this->url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+		curl_setopt($ch, CURLOPT_POST, true);
+		curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));		
+        $response = curl_exec($ch);
+        curl_close($ch);
+		return $response; 		
+
 	}
 
-	public function getCalendarsList() {
-		$url_parameters = array();
+	private function connectCurlwithPut($headers,$payload){
 
-		$url_parameters['fields'] = 'items(id,summary,timeZone)';
-		$url_parameters['minAccessRole'] = 'owner';
+        $ch = curl_init($this->url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "PUT");
+		curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));		
+        $response = curl_exec($ch);
+        curl_close($ch);
+		return $response; 		
 
-		$url_calendars = 'https://www.googleapis.com/calendar/v3/users/me/calendarList?'. http_build_query($url_parameters);
-		
-		$ch = curl_init();		
-		curl_setopt($ch, CURLOPT_URL, $url_calendars);		
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);	
-		curl_setopt($ch, CURLOPT_HTTPHEADER, array('Authorization: Bearer '. $this->access_token));	
-		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);	
-		$data = json_decode(curl_exec($ch), true); //echo '<pre>';print_r($data);echo '</pre>';
-		$http_code = curl_getinfo($ch,CURLINFO_HTTP_CODE);		
-		if($http_code != 200) 
-			throw new Exception('Error : Failed to get calendars list');
-
-		return $data['items'];
 	}
+	
+	private function connectCurlwithDelete($headers){
 
-	// need to add repeat argument here
-	public function createCalendarEvent($calendar_id, $summary, $all_day, $recurrence, $recurrence_end, $event_time, $event_timezone, $access_token) {
-		$url_events = 'https://www.googleapis.com/calendar/v3/calendars/' . $calendar_id . '/events';
+        $ch = curl_init($this->url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+        $response = curl_exec($ch);
+        curl_close($ch);
+		return $response; 		
 
-		$curlPost = array('summary' => $summary); // event title
+	}	
 
-		// if event is an all day event or not 
-		if($all_day == 1) {
-			$curlPost['start'] = array('date' => $event_time['event_date']);
-			$curlPost['end'] = array('date' => $event_time['event_date']);
+	
+	
+	/**
+	 * getEvents
+	 *
+	 * @param  array $params
+	 * @return void
+	 */
+	public function getEvents($params = [])
+    {
+        $this->url = "https://www.googleapis.com/calendar/v3/calendars/{$this->calendarId}/events";
+		if($this->eventId)
+			$this->url = $this->url."/".$this->eventId;
+		if(!empty($params)){
+			$this->url = $this->url."?";
+			$count = 0;			
+			foreach($params as $key => $item){
+				if($count == 0)$separator = "";
+				else $separator = "&";
+				$this->url = $this->url.$separator.$key."=".$item;			
+			}
 		}
-		else {
-			$curlPost['start'] = array('dateTime' => $event_time['start_time'], 'timeZone' => $event_timezone);
-			$curlPost['end'] = array('dateTime' => $event_time['end_time'], 'timeZone' => $event_timezone);
-		}
 
-		// if event repeats or not
-		if ($recurrence == 1) {
-			// repeats weekly until XXXX
-			// RRULE:FREQ=WEEKLY;UNTIL=XXXX
+        $headers = array(
+            "Authorization: Bearer {$this->accessToken}",
+            "Content-type: application/json"
+        );
+        $response = self::connectCurl($headers);
+        return json_decode($response, true);
+    }	
+	
+	/**
+	 * getEvents
+	 *
+	 * @param  mixed $payload
+	 * @return void
+	 */
+	public function insertEvent($payload)
+    {
+        $this->url = "https://www.googleapis.com/calendar/v3/calendars/{$this->calendarId}/events";
+        $headers = array(
+            "Authorization: Bearer {$this->accessToken}",
+            "Content-type: application/json"
+        );
+        $response = self::connectCurlwithPost($headers,$payload);
+        return json_decode($response, true);
+    }	
+	
 
-			$curlPost['recurrence'] = array("RRULE:FREQ=WEEKLY;UNTIL=" . str_replace('-', '', $recurrence_end) . ";" );
-		}
+	public function updateEvent($payload)
+    {
+        $this->url = "https://www.googleapis.com/calendar/v3/calendars/{$this->calendarId}/events/".$this->eventId;
+
+        $headers = array(
+            "Authorization: Bearer {$this->accessToken}",
+            "Content-type: application/json"
+        );
+        $response = self::connectCurlwithPut($headers,$payload);
+        return json_decode($response, true);
+    }	
+	
+	public function deleteEvent()
+    {
+        $this->url = "https://www.googleapis.com/calendar/v3/calendars/{$this->calendarId}/events/".$this->eventId;
+
+        $headers = array(
+            "Authorization: Bearer {$this->accessToken}",
+            "Content-type: application/json"
+        );
+        $response = self::connectCurlwithDelete($headers);
+        return json_decode($response, true);
+    }		
 
 
-		$ch = curl_init(); // Initializes a new session and return a cURL handle	
-		curl_setopt($ch, CURLOPT_URL, $url_events);		
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1); // return the transfer as a string of the return value of curl_exec() instead of outputting it directly.	
-		curl_setopt($ch, CURLOPT_POST, 1); // http post	
-		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE); // stop cURL from verifying the peer's certificate
-		curl_setopt($ch, CURLOPT_HTTPHEADER, array('Authorization: Bearer '. $access_token, 'Content-Type: application/json'));	
-		curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($curlPost));	
-		$data = json_decode(curl_exec($ch), true);
-		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);		
-		if($http_code != 200) 
-			throw new Exception('Error : Failed to create event');
-
-		return $data['id'];
-	}
-
-	public function updateCalendarEvent($event_id, $calendar_id, $summary, $all_day, $event_time, $event_timezone, $access_token) {
-		$url_events = 'https://www.googleapis.com/calendar/v3/calendars/' . $calendar_id . '/events/' . $event_id;
-
-		$curlPost = array('summary' => $summary);
-		if($all_day == 1) {
-			$curlPost['start'] = array('date' => $event_time['event_date']);
-			$curlPost['end'] = array('date' => $event_time['event_date']);
-		}
-		else {
-			$curlPost['start'] = array('dateTime' => $event_time['start_time'], 'timeZone' => $event_timezone);
-			$curlPost['end'] = array('dateTime' => $event_time['end_time'], 'timeZone' => $event_timezone);
-		}
-		$ch = curl_init();		
-		curl_setopt($ch, CURLOPT_URL, $url_events);		
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);		
-		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');		
-		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
-		curl_setopt($ch, CURLOPT_HTTPHEADER, array('Authorization: Bearer '. $access_token, 'Content-Type: application/json'));	
-		curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($curlPost));	
-		$data = json_decode(curl_exec($ch), true);
-		$http_code = curl_getinfo($ch,CURLINFO_HTTP_CODE);		
-		if($http_code != 200) 
-			throw new Exception('Error : Failed to update event');
-	}
-
-	public function deleteCalendarEvent($event_id, $calendar_id, $access_token) {
-		$url_events = 'https://www.googleapis.com/calendar/v3/calendars/' . $calendar_id . '/events/' . $event_id;
-
-		$ch = curl_init();		
-		curl_setopt($ch, CURLOPT_URL, $url_events);		
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);		
-		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');		
-		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
-		curl_setopt($ch, CURLOPT_HTTPHEADER, array('Authorization: Bearer '. $access_token, 'Content-Type: application/json'));		
-		$data = json_decode(curl_exec($ch), true);
-		$http_code = curl_getinfo($ch,CURLINFO_HTTP_CODE);
-		if($http_code != 204) 
-			throw new Exception('Error : Failed to delete event');
-	}
+	
 }
 
 ?>
