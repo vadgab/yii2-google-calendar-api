@@ -87,7 +87,8 @@ $payload = array(
     'start' => array('dateTime' => "2023-05-10T10:00:00Z"),
     'end' => array('dateTime' => "2023-05-10T11:00:00Z"),
 );
-       $events = $serviceAccount->insertEvent($payload);
+
+$events = $serviceAccount->insertEvent($payload);
 
 
 echo "<pre>";
