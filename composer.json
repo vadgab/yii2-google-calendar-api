@@ -4,7 +4,7 @@
     "keywords": ["yii2", "google-calendar", "api"],
     "description": "The application is a YII2-Extension for the Google Calendar API",
     "license": "MIT",
-    "version": "1.0"
+    "version": "1.0",
     "support": {
     },
     "authors": [
